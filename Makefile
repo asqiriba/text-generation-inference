@@ -35,3 +35,9 @@ run-bloom:
 
 run-bloom-quantize:
 	text-generation-launcher --model-id bigscience/bloom --num-shard 8 --quantize
+
+docker-build:
+	docker build . -t new-nebula
+	
+docker-run:
+	docker run -it --rm --gpus all --shm-size 1g -p 7070:80 -v $volume:/data -t new-nebula --model-id EleutherAI/gpt-j-6B
