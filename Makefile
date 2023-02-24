@@ -46,7 +46,7 @@ push:
 	gcloud builds submit --tag gcr.io/gpt-3-for-web/orion-nebula-v2 --timeout=6000
 
 k8s:
-	gcloud container node-pools create orion-nebula-v2-node --accelerator type=nvidia-tesla-a100,count=1 --zone us-central1-c --cluster orion-nebula-v2-cluster [--num-nodes 1 --min-nodes 0 --max-nodes 5 --enable-autoscaling --machine-type a2-highgpu-1g]
+	gcloud container node-pools create orion-nebula-v2-node --accelerator type=nvidia-tesla-a100,count=1 --zone us-central1-a --cluster orion-nebula-v2-cluster --num-nodes 1 --min-nodes 0 --max-nodes 5 --enable-autoscaling --machine-type a2-highgpu-1g
 
 %:
 	@:
