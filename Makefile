@@ -43,7 +43,7 @@ docker-run:
 	docker run -it --rm --gpus all --shm-size 1g -p 7070:80 -v $volume:/data -t new-nebula --model-id EleutherAI/gpt-j-6B
 
 push:
-	gcloud builds submit --tag gcr.io/gpt-3-for-web/nebula-v2 --timeout=6000
+	gcloud builds submit --tag gcr.io/gpt-3-for-web/orion-nebula-v2 --timeout=6000
 
 %:
 	@:
