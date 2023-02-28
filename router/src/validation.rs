@@ -13,24 +13,26 @@ use tracing::{instrument, Span};
 #[derive(Debug, Clone)]
 pub struct Validation {
     /// Channel to communicate with the background validation task
-    sender: mpsc::UnboundedSender<ValidationRequest>,
+    sender: mpsc::Sender<ValidationRequest>,
 }
 
 impl Validation {
     pub(crate) fn new(
         workers: usize,
         tokenizer: Tokenizer,
+        max_max_new_tokens: u32,
         max_stop_sequences: usize,
         max_input_length: usize,
         max_total_tokens: usize,
     ) -> Self {
         // Create channel
-        let (validation_sender, validation_receiver) = mpsc::unbounded_channel();
+        let (validation_sender, validation_receiver) = mpsc::channel(128);
 
         // Launch background validation task
         tokio::spawn(validation_task(
             workers,
             tokenizer,
+            max_max_new_tokens,
             max_stop_sequences,
             max_input_length,
             max_total_tokens,
@@ -54,6 +56,7 @@ impl Validation {
         // Unwrap is safe here
         self.sender
             .send((request, sender, Span::current()))
+            .await
             .unwrap();
         // Await on response channel
         // Unwrap is safe here
@@ -66,10 +69,11 @@ impl Validation {
 async fn validation_task(
     workers: usize,
     tokenizer: Tokenizer,
+    max_max_new_tokens: u32,
     max_stop_sequences: usize,
     max_input_length: usize,
     max_total_tokens: usize,
-    mut receiver: mpsc::UnboundedReceiver<ValidationRequest>,
+    mut receiver: mpsc::Receiver<ValidationRequest>,
 ) {
     let mut workers_senders = Vec::with_capacity(workers);
 
@@ -84,6 +88,7 @@ async fn validation_task(
         tokio::task::spawn_blocking(move || {
             validation_worker(
                 tokenizer_clone,
+                max_max_new_tokens,
                 max_stop_sequences,
                 max_input_length,
                 max_total_tokens,
@@ -108,6 +113,7 @@ async fn validation_task(
 /// the tokenizer
 fn validation_worker(
     tokenizer: Tokenizer,
+    max_max_new_tokens: u32,
     max_stop_sequences: usize,
     max_input_length: usize,
     max_total_tokens: usize,
@@ -124,13 +130,13 @@ fn validation_worker(
                     validate(
                         request,
                         &tokenizer,
+                        max_max_new_tokens,
                         max_stop_sequences,
                         max_input_length,
                         max_total_tokens,
                         &mut rng,
                     )
                     .map_err(|err| {
-                        metrics::increment_counter!("tgi_request_failure", "err" => "validation");
                         tracing::error!("{err}");
                         err
                     }),
@@ -143,6 +149,7 @@ fn validation_worker(
 fn validate(
     request: GenerateRequest,
     tokenizer: &Tokenizer,
+    max_max_new_tokens: u32,
     max_stop_sequences: usize,
     max_input_length: usize,
     max_total_tokens: usize,
@@ -187,8 +194,8 @@ fn validate(
         }
     }?;
 
-    if max_new_tokens == 0 {
-        return Err(ValidationError::MaxNewTokens);
+    if max_new_tokens == 0 || max_new_tokens > max_max_new_tokens {
+        return Err(ValidationError::MaxNewTokens(max_max_new_tokens));
     }
 
     if stop_sequences.len() > max_stop_sequences {
@@ -214,14 +221,12 @@ fn validate(
         Ok(encoding) => {
             let input_length = encoding.len();
             let total_tokens = input_length + max_new_tokens as usize;
-
             if input_length > max_input_length {
                 Err(ValidationError::InputLength(max_input_length, input_length))
             } else if total_tokens > max_total_tokens {
                 Err(ValidationError::MaxTotalTokens(
                     max_total_tokens,
-                    input_length,
-                    max_new_tokens,
+                    total_tokens,
                 ))
             } else {
                 // Return ValidGenerateRequest
@@ -237,9 +242,6 @@ fn validate(
                     max_new_tokens,
                     stop_sequences,
                 };
-
-                metrics::histogram!("tgi_request_input_length", input_length as f64);
-                metrics::histogram!("tgi_request_max_new_tokens", max_new_tokens as f64);
 
                 Ok(ValidGenerateRequest {
                     inputs: request.inputs,
@@ -277,10 +279,10 @@ pub enum ValidationError {
     TopP,
     #[error("top_k must be strictly positive")]
     TopK,
-    #[error("max_new_tokens must be strictly positive")]
-    MaxNewTokens,
-    #[error("input tokens + max_new_tokens must be <= {0}. Given: {1} input tokens and {2} max_new_tokens")]
-    MaxTotalTokens(usize, usize, u32),
+    #[error("max_new_tokens must be strictly positive and <= {0}")]
+    MaxNewTokens(u32),
+    #[error("input tokens + max_new_tokens must be <= {0}. Given {1}")]
+    MaxTotalTokens(usize, usize),
     #[error("inputs must have less than {0} tokens. Given: {1}")]
     InputLength(usize, usize),
     #[error("inputs cannot be empty")]

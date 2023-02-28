@@ -29,7 +29,7 @@ struct Args {
     quantize: bool,
     #[clap(default_value = "128", long, env)]
     max_concurrent_requests: usize,
-    #[clap(default_value = "1000", long, env)]
+    #[clap(default_value = "2000", long, env)]
     max_input_length: usize,
     #[clap(default_value = "32", long, env)]
     max_batch_size: usize,
